@@ -1,0 +1,7 @@
+# myblocks
+
+Adventures coding in lightfood for ROLI Lightpad!
+
+# Ableton-reloaded
+The preset is great, but wouldn't it be nice to be able to change octaves in melodic mode? This mode allows you to to do just that, adding octage up and down buttons, and a wee indicator to who which octave you're currently on!
+[[ableton-reloaded.JPG]]
