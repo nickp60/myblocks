@@ -1,0 +1,346 @@
+/*
+<metadata description="Turn your Lightpad Block into a bank of MIDI faders." details="This app turns your Lightpad into 4 banks of 4 assignable MIDI CC touch faders. The Mode button moves between banks and loading this to multiple connected Blocks will map the banks across the Blocks. You can also configure the MIDI CC, max and min value and the colour of each fader." 
+          target="Lightpad" 
+          tags="MIDI;Controller;Mixing;" canEmbedModes="false">
+    <groups>
+        <group name="sliders" displayName="Fader *" count="16" />
+    </groups>
+	<variables>
+	    <variable name="midiChannel" displayName="MIDI Channel" type="int" min="1" max="16" value="1" displayMode="stepper" tooltip="The MIDI channel that values are sent on" />
+		<vector count="16" group="sliders" wantsGetFunctions="true" wantsSetFunctions="true">
+			<variable name="cc" displayName="CC" type="int" min="0" max="127" value="0" initStart="21" tooltip="The MIDI CC sent by the fader" />
+			<variable name="colour" displayName="Colour" type="colour" value="random" tooltip="Colour of the fader" />
+			<variable name="sliderMin" displayName="Minimum" type="int" min="0" max="127" value="0" visible="true" tooltip="The minimum MIDI CC value sent by the fader"/>
+			<variable name="sliderMax" displayName="Maximum" type="int" min="0" max="127" value="127" visible="true" tooltip="The maximum MIDI CC value sent by the fader"/>
+		</vector>
+        <vector count="16" wantsGetFunctions="true" wantsSetFunctions="true">
+            <variable name="slider" type="int" min="0" max="127" value="0" visible="false" internal="true" />
+        </vector>
+	</variables>
+</metadata>
+*/
+
+int bank;
+int leslie;
+int clusterSize;
+bool bankButtonEnabled;
+int clusterUpdateStage;
+int sliderChangeMessage;
+int sliderMin, sliderMax;
+int getFirstSliderIndexForBank ()
+{
+    return bank * 8;
+}
+
+int sliderIndexForX (float x)
+{
+    float x01 = x * 0.5;
+
+    // Each slider has an area of 3px + 1px gap. We want the gaps to be dead zones..
+	int ledZone = int (x01 * 15);
+    // not
+	if (ledZone <= 1) return 0;
+	if (ledZone >= 2 && ledZone <= 3) return 1;
+	if (ledZone >= 4 && ledZone <= 5) return 2;
+	if (ledZone >= 6 && ledZone <= 7) return 3;
+	if (ledZone >= 8 && ledZone <= 9) return 4;
+	if (ledZone >= 10 && ledZone <= 11) return 5;
+	if (ledZone >= 12 && ledZone <= 13) return 6;
+	if (ledZone >= 14 && ledZone <= 15) return 7;
+
+	return -1;
+}
+
+bool sliderIsInBank (int sliderIndex)
+{
+    int bankStart = getFirstSliderIndexForBank();
+    int bankEnd   = bankStart + 8;
+    return (sliderIndex >= bankStart && sliderIndex < bankEnd);
+}
+
+int getSliderMaxValueForClusterSize (int theClusterSize)
+{
+    if (theClusterSize == 1)
+        return 10;
+
+    return 15;
+}
+
+int getSliderMaxValue()
+{
+    return getSliderMaxValueForClusterSize (clusterSize);
+}
+
+float getSliderMinValue()
+{
+    if (clusterSize == 1)
+    {
+        return 1.0;
+    }
+
+    return 0.0;
+}
+
+float getSliderValue01ForTouchAtY (float y)
+{
+    float sliderMax   = 10.0;
+    float sliderMin   = getSliderMinValue();
+    float sliderRange = sliderMax - sliderMin;
+
+    float closestLED  = clamp (sliderMin, sliderMax, float (y * 14));
+    float value01     = ((closestLED - sliderMin) / sliderRange);
+    return 1.0 - value01;
+}
+
+int convertSliderValue01ToRange (float slider01, int sliderMin, int sliderMax, int hardMax)
+{
+    return clamp (0x00, hardMax, sliderMin + int (slider01 * float (sliderMax - sliderMin)));
+}
+
+int convertSliderValue01ToOutputRange (int sliderIndex, float slider01)
+{
+//     return convertSliderValue01ToRange (slider01, getSliderMin (sliderIndex), getSliderMax (sliderIndex), 0x7F);
+    return convertSliderValue01ToRange (slider01, 0, 127, 0x7F);
+}
+
+void dealWithLeslie(int intx)
+{
+    if ( intx < 60 ){
+        sendMIDI (0xB0 , 1, 0);
+        leslie = 0;
+    }
+    if ( intx >= 60) {
+        if (intx <= 130 )
+        {   
+            sendMIDI (0xB0 , 1, 66);        
+            leslie = 1;
+        }    
+        else
+        {   
+           sendMIDI (0xB0 , 1, 126);               
+            leslie = 2;
+        }
+    }
+    //log(leslie);
+}
+
+void doTouch (int index, float x, float y, float z, float vz)
+{   
+    log(sliderIndexForX(x));
+	int sliderIndex = sliderIndexForX(x) + getFirstSliderIndexForBank();
+	int intx = int(100.8 * x);
+	int inty = int(100.8 * y);
+	//log(int(100.8 * x));
+	//log(int(100.8  * y));
+	if (inty > 145)
+    {
+        dealWithLeslie(intx);
+    }
+	else if (sliderIndex >= 0)
+    {
+        //int currentValue = getSlider (sliderIndex);
+        int currentValue = sliderIndex;
+        float slider01   = getSliderValue01ForTouchAtY (y * 0.5);
+        int midiValue    = convertSliderValue01ToOutputRange (sliderIndex, slider01);
+        int newValue     = convertSliderValue01ToRange (slider01, 1, getSliderMaxValue(), getSliderMaxValue());
+
+        setSlider (sliderIndex, getSliderMaxValue() - newValue);
+
+        if (clusterSize != 1 && currentValue != newValue)
+        {
+            sendSliderValueMessage (sliderIndex, newValue);
+        }
+ //         log(midiChannel);
+//         log(sliderIndex);
+//         log(midiValue);
+//         log(0);
+        sendMIDI (0xB0 , getCc (sliderIndex), midiValue);
+        //sendMIDI (0xB0 | (midiChannel - 1), getCc (sliderIndex + 20), midiValue);
+        //sendMIDI (1, getCc (sliderIndex + 20), 90);
+    }
+    
+}
+
+void touchStart (int index, float x, float y, float z, float vz)
+{
+	doTouch (index, x, y, z, vz);
+}
+
+void touchMove (int index, float x, float y, float z, float vz)
+{
+	doTouch (index, x, y, z, vz);
+}
+
+void handleButtonDown (int index)
+{
+    if (bankButtonEnabled)
+    {
+        bank = (bank + 1) % 2;
+    }
+}
+
+void paintBankIndicator()
+{
+    if (clusterSize == 1)
+    {
+        fillRect (makeARGB (255, 255, 0, 0), getFirstSliderIndexForBank(), 0, 7, 1);
+    }
+}
+
+void paintSliders()
+{
+    //sliderMin = 1;
+    //sliderMax = 9;
+    int bankStart = getFirstSliderIndexForBank();
+    for (int slider = 0; slider < 8; ++slider)
+	{
+		int sliderIndex  = slider + bankStart;
+		int sliderValue  = getSlider (sliderIndex);
+		int sliderColour = getColour (sliderIndex);
+		fillRect (sliderColour, slider * 2,  int(getSliderMinValue()), 2, sliderValue);
+	}
+}
+
+void paintLeslie()
+{
+    
+    if (leslie == 0)
+    {       
+        //button
+        fillRect (0xFF897C03, 1, 12, 3 , 3);
+        // post
+        fillRect (0xFF897C03, 4, 13, 3, 1);
+    }
+    else if (leslie == 1)
+    {       
+        //button
+        fillRect (0xFF897C03, 6, 12, 3 , 3);
+        // post is invisible
+    }
+    else if (leslie == 2)
+    {       
+        //button
+        fillRect (0xFF897C03, 11, 12, 3 , 3);
+        // post
+        fillRect (0xFF897C03, 8, 13, 3, 1);
+    }
+}
+void repaint()
+{
+    clearDisplay();
+    paintBankIndicator();
+    paintSliders();
+    // draw line uder drawbars
+    fillRect (0xFF83DD79, 0,  11, 15, 1);
+    //sendNoteOn(1, 45, 90);
+    paintLeslie();
+    //sendNoteOff(1, 45, 90);
+    updateClustering();
+}
+
+
+void zeroSliders()
+{
+    for (int i = 0; i < 16; ++i)
+        setSlider (i, 1);
+}
+
+void initialise()
+{
+    sliderChangeMessage = 0x7F2E;
+    clusterUpdateStage = -1;
+    zeroSliders();
+    updateClusterPosition();
+    notifyOtherBlocksInClusterOfSliderValues();
+
+    for (int i = 0; i < 32; ++i)
+        setLocalConfigActiveState (i, false, false);
+}
+
+void updateClusterPosition()
+{
+    clusterSize = getClusterWidth();
+
+    if (clusterSize == 1)
+    {
+	    bank              = 0;
+	    bankButtonEnabled = true;
+    }
+    else
+    {
+        bank              = getClusterXpos();
+        bankButtonEnabled = false;
+    }
+}
+
+void updateClustering()
+{
+    int newClusterSize = getClusterWidth();
+    if (clusterSize != newClusterSize)
+    {
+        if (newClusterSize == 1)
+            rescaleSliders (false);
+        else if (newClusterSize > 1 && clusterSize == 1)
+            rescaleSliders (true);
+
+        updateClusterPosition();
+        notifyOtherBlocksInClusterOfSliderValues();
+    }
+}
+
+void notifyOtherBlocksInClusterOfSliderValues()
+{
+    if (isMasterInCurrentCluster() && clusterSize != 1)
+    {
+        int ourID = getBlockIDForIndex (0);
+        for (int clusterIndex = 0; clusterIndex < getNumBlocksInCurrentCluster(); ++clusterIndex)
+        {
+            int id = getBlockIdForBlockInCluster (clusterIndex);
+        
+            if (id == ourID)
+                continue;
+            
+            for (int slider = 0; slider < 16; ++slider)
+                sendMessageToBlock (id, sliderChangeMessage, slider, getSlider (slider));
+        }
+    }
+}
+
+void handleMessage (int data0, int data1, int data2)
+{
+    if (data0 == sliderChangeMessage)
+        setSlider (data1, data2);
+}
+
+void sendSliderValueMessage (int slider, int value)
+{
+    int ourID = getBlockIDForIndex (0);
+    for (int clusterIndex = 0; clusterIndex < getNumBlocksInCurrentCluster(); ++clusterIndex)
+    {
+        int id = getBlockIdForBlockInCluster (clusterIndex);
+        
+        if (id == ourID)
+            continue;
+            
+        sendMessageToBlock (id, sliderChangeMessage, slider, value);
+    }
+}
+
+void rescaleSliders (bool isNowClustering)
+{
+    float nonClusterMax = float (getSliderMaxValueForClusterSize (1));
+    float clusterMax    = float (getSliderMaxValueForClusterSize (4));
+
+    if (isNowClustering)
+    {
+        for (int slider = 0; slider < 16; ++slider)
+            setSlider (slider, int ((float (getSlider (slider)) / nonClusterMax) * clusterMax));  
+    }
+    else
+    {
+        for (int slider = 0; slider < 16; ++slider)
+            setSlider (slider, int ((float (getSlider (slider)) / clusterMax) * nonClusterMax));   
+    }
+}
+
+
