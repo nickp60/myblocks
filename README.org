@@ -5,3 +5,7 @@ Adventures coding in lightfood for ROLI Lightpad!
 # Ableton-reloaded
 The preset is great, but wouldn't it be nice to be able to change octaves in melodic mode? This mode allows you to to do just that, adding octage up and down buttons, and a wee indicator to who which octave you're currently on!
 [[pics/ableton-reloaded.JPG]]
+
+# B5-buddy
+Everybody loves playing a nice B3.  But for those of us limitted to softsynths, wouldn't it be nice to control your drawbars and Leslie with your lightpad?  Now you can!
+[[pics/b5-buddy.jpg]]
